@@ -2,80 +2,153 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 
-st.set_page_config(page_title="EDA 리포트 생성 앱", layout="wide")
+model_name = "Gradient Boosting"
+st.set_page_config(page_title="Personality Prediction", layout="wide")
+st.title("🧠 외향형/내향형 예측 Streamlit 앱")
+st.write(f"{model_name}을 이용한 Personality Classification")
 
-st.title("📊 EDA 리포트 생성 Streamlit 앱")
-st.write(
-    "CSV 파일을 업로드하면 자동으로 탐색적 데이터 분석(EDA) 리포트를 생성합니다. "
-    "6주차 강의에서 배운 AI 프로젝트 배포 실습용으로 제작된 앱입니다."
-)
 
-# ---------------------------------------------------------
-# 1. 데이터 업로드
-# ---------------------------------------------------------
-uploaded_file = st.sidebar.file_uploader("CSV 파일을 업로드하세요", type=["csv"])
+def evaluate(df, model):
 
-st.sidebar.markdown("---")
-use_sample = st.sidebar.checkbox("샘플 데이터(tips) 사용하기", value=True if uploaded_file is None else False)
+    # target 설정
+    y = df["Personality_Introvert"]
+    X = df.drop(columns=["Personality_Introvert"])
 
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-elif use_sample:
-    df = sns.load_dataset("tips")
-else:
-    st.info("왼쪽 사이드바에서 CSV 파일을 업로드하거나 샘플 데이터를 선택하세요.")
-    st.stop()
+    # train, test 나누기
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
 
-# ---------------------------------------------------------
-# 2. 데이터 개요
-# ---------------------------------------------------------
-st.header("1. 데이터 개요")
-col1, col2, col3 = st.columns(3)
-col1.metric("행 개수", df.shape[0])
-col2.metric("열 개수", df.shape[1])
-col3.metric("결측치 총합", int(df.isnull().sum().sum()))
+    # 학습
+    model.fit(X_train, y_train)
 
-st.dataframe(df.head())
+    # 예측
+    y_pred = model.predict(X_test)
 
-# ---------------------------------------------------------
-# 3. 결측치 리포트
-# ---------------------------------------------------------
-st.header("2. 결측치 확인")
-missing_count = df.isnull().sum()
-missing_pct = (missing_count / len(df) * 100).round(2)
-missing_report = pd.DataFrame({"결측치 개수": missing_count, "결측치 비율(%)": missing_pct})
-st.dataframe(missing_report.sort_values("결측치 개수", ascending=False))
+    # 정확도
+    acu = accuracy_score(y_test, y_pred)
 
-# ---------------------------------------------------------
-# 4. 기술 통계
-# ---------------------------------------------------------
-st.header("3. 기술 통계")
-st.dataframe(df.describe().T)
+    return acu
 
-# ---------------------------------------------------------
-# 5. 상관관계 히트맵
-# ---------------------------------------------------------
-st.header("4. 상관관계 히트맵")
-numeric_df = df.select_dtypes(include="number")
-if numeric_df.shape[1] >= 2:
-    fig, ax = plt.subplots(figsize=(6, 5))
-    sns.heatmap(numeric_df.corr(), annot=True, cmap="Blues", ax=ax)
+
+tab1, tab2, tab3 = st.tabs(["📊 데이터 전처리", "📌 모델 정보", "🤖 모델 결과"])
+
+with tab1:
+    # 데이터 불러오기
+    st.subheader("1. 원본 데이터")
+    df = pd.read_csv("train.csv")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("행 개수", df.shape[0])
+    col2.metric("열 개수", df.shape[1])
+    col3.metric("결측치 개수 총합", int(df.isnull().sum().sum()))
+    with st.expander("원본 데이터 보기"):
+        st.dataframe(df)
+    st.divider()
+
+    # 데이터 ignore
+    st.subheader("2. 데이터 선별")
+    df = df.drop(columns=["id"])
+    st.info("""
+        관련도 낮은 칼럼 무시 : id
+
+        Target 설정: Personality
+        """)
+    st.divider()
+
+    # 결측치 현황
+    st.subheader("3. 결측치 처리")
+
+    st.write("#### 결측치 현황")
+    # 컬럼별 결측치 개수
+    missing_count = df.isnull().sum()
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+
+    sns.barplot(x=missing_count.index, y=missing_count.values, ax=ax)
+
+    ax.set_title("Missing count of Features")
+    ax.set_xlabel("Column")
+    ax.set_ylabel("Missing Count")
+    plt.xticks(rotation=45, ha="right")
+
     st.pyplot(fig)
-else:
-    st.warning("상관관계를 계산할 수치형 컬럼이 2개 미만입니다.")
 
-# ---------------------------------------------------------
-# 6. 분포 시각화 (사용자 선택)
-# ---------------------------------------------------------
-st.header("5. 컬럼별 분포 시각화")
-if len(numeric_df.columns) > 0:
-    selected_col = st.selectbox("분포를 확인할 컬럼을 선택하세요", numeric_df.columns)
-    fig2, ax2 = plt.subplots(figsize=(6, 4))
-    sns.histplot(df[selected_col], kde=True, ax=ax2)
-    st.pyplot(fig2)
-else:
-    st.warning("시각화할 수치형 컬럼이 없습니다.")
+    # 결측칼럼 수 연산
+    st.write("#### 새로운 칼럼 추가(인당 결측 데이터 개수)")
+    df["n_missing"] = df.isnull().sum(axis=1)
+    st.dataframe(df[["n_missing", "Personality"]].head())
 
-st.markdown("---")
-st.caption("AI for Future Workforce · Week 6: AI Project Deployment 실습용 앱")
+    # 결측치 Average/Most frequent
+    # 숫자형 컬럼
+    st.write("#### 결측치 처리")
+    st.write("-> 숫자형 컬럼은 평균값, 범주형 칼럼은 최빈값으로 대체")
+    numeric_cols = df.select_dtypes(include=["number"]).columns
+    for col in numeric_cols:
+        df[col] = df[col].fillna(df[col].mean())
+
+    # 범주형 컬럼
+    categorical_cols = df.select_dtypes(include=["object", "category"]).columns
+    for col in categorical_cols:
+        df[col] = df[col].fillna(df[col].mode()[0])
+
+    st.write(f"#### 처리 후 결측치 개수 총합 : {int(df.isnull().sum().sum())}")
+    st.divider()
+
+    # continuize 범주형만 원핫인코딩
+    st.subheader("4. Continuize")
+    st.write("범주형 데이터를 One-Hot Encoding 수행")
+    df = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
+
+    st.divider()
+    st.subheader("전처리 후 데이터")
+    col1, col2 = st.columns(2)
+    col1.metric("컬럼 수", df.shape[1])
+    col2.metric("결측치", int(df.isnull().sum().sum()))
+    with st.expander("데이터 보기"):
+        st.dataframe(df)
+
+
+with tab2:
+    param_df = pd.DataFrame(
+        {
+            "Parameter": [
+                "model_name",
+                "n_estimators",
+                "learning_rate",
+                "max_depth",
+                "min_samples_split",
+            ],
+            "Value": [model_name, 100, 0.1, 5, 2],
+        }
+    )
+
+    st.table(param_df)
+with tab3:
+    # 모델 적용
+    model = GradientBoostingClassifier(
+        n_estimators=100,
+        learning_rate=0.100,
+        max_depth=5,
+        min_samples_split=2,
+        random_state=42,
+    )
+    st.subheader("Accuracy")
+    st.metric("", f"{evaluate(df,model):.3f}")
+    st.divider()
+    st.subheader("칼럼 별 중요도")
+    importance = pd.DataFrame(
+        {
+            "Feature": df.drop(columns=["Personality_Introvert"]).columns,
+            "Importance": model.feature_importances_,
+        }
+    )
+    importance = importance.sort_values("Importance", ascending=True)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    sns.barplot(data=importance, x="Importance", y="Feature", ax=ax)
+
+    st.pyplot(fig)
+    st.dataframe(importance.sort_values("Importance", ascending=False))
